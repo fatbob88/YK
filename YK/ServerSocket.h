@@ -2,6 +2,87 @@
 
 #include "pch.h"
 #include "framework.h"
+
+
+
+
+class CPacket
+{
+public:
+	CPacket():
+		sHead(0),
+		nLength(0),
+		sCmd(0),
+		sSum(0)
+	{
+	
+	
+	
+	}
+	CPacket(const CPacket& pack) {
+	
+		sHead = pack.sHead;
+		nLength = pack.nLength;
+		sCmd = pack.sCmd;
+		sSum = pack.sSum;
+	}
+	CPacket(const BYTE* pData, size_t& nSize) {
+	
+		size_t i = 0;
+		for (; i < nSize; i++) {
+
+			if (*(WORD*)(pData + i) == 0xFEFF) {
+
+				sHead = *(WORD*)(pData + i);
+				i += 2;
+				break;
+			}
+
+		}
+		if (i+8 >=nSize) {//包数据可能不全,包头可能未全部解析到
+			nSize = 0;
+			return;
+		}
+		nLength=*(DWORD*)(pData + i);
+		i += 4;
+		if (nLength + i > nSize) {//包未完全接收到
+			nSize = 0;
+			return;
+		}
+		sCmd= *(WORD*)(pData + i);
+		i += 2;
+		if (nLength > 4) {
+			strData.resize(nLength - 2 - 2);
+			memcpy((void*)strData.c_str(), pData + i, nLength - 2 - 2);
+			i += nLength - 4;
+		}
+		sSum = *(WORD*)(pData + i);
+		WORD sum = 0;
+		for (size_t j = 0; j < strData.size(); j++) {
+
+
+			sum += BYTE(strData[j]) & 0xFF;
+
+		}
+		if (sum == sSum) {
+		
+			nSize = nLength + 2 + 4;
+			return;
+		}
+		nSize = 0;
+	
+	}
+	~CPacket() {}
+public:
+	WORD sHead;
+	DWORD nLength;
+	WORD sCmd;
+	std::string strData;
+	WORD sSum;
+private:
+
+};
+
 class CServerSocket
 {
 
@@ -36,15 +117,18 @@ public:
 
 	int DealCommand() {
 		if (m_client_sock == -1)return -1;
-		char buffer[1024]="";
+		char *buffer= new char[4096];
+		memset(buffer, 0, 4096);
 		while (1) {
-			int len=recv(m_client_sock, buffer, sizeof(buffer), 0);
+			size_t len=recv(m_client_sock, buffer, sizeof(buffer), 0);
 			if (len <= 0)return -1;
-			
-		
-		
+			CPacket packet((BYTE*)buffer, len);
+			if (len > 0) {
+				return packet.sCmd;
+			}
 		}
 	}
+
 	bool Send(const char*pData,int nSize) {
 	
 		return send(m_client_sock, pData, nSize, 0)>0;
@@ -54,6 +138,7 @@ public:
 private:
 	SOCKET m_serv_sock;
 	SOCKET m_client_sock;
+	CPacket m_packet;
 	CServerSocket(const CServerSocket&) = delete;
 	CServerSocket& operator=(const CServerSocket& ss) = delete;
 	CServerSocket() {
