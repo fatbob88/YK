@@ -4,8 +4,8 @@
 #include "framework.h"
 
 
-
-
+#pragma pack(push)
+#pragma pack(1)
 class CPacket
 {
 public:
@@ -15,9 +15,23 @@ public:
 		sCmd(0),
 		sSum(0)
 	{
+	}
+	CPacket(WORD nCmd, const BYTE* pData, size_t nSize) {
 	
-	
-	
+		sHead = 0xFEFF;
+		nLength = nSize+4;
+		sCmd = nCmd;
+		if (nSize > 0) {strData.resize(nSize);
+		memcpy((void*)strData.c_str(), pData, nSize);}
+		else { strData.clear(); }
+		sSum = 0;
+		for (size_t j = 0; j < strData.size(); j++) {
+
+
+			sSum += BYTE(strData[j]) & 0xFF;
+
+		}
+
 	}
 	CPacket(const CPacket& pack) {
 	
@@ -89,16 +103,35 @@ public:
 	
 	}
 	~CPacket() {}
+	int Size()
+	{
+		return nLength + 6;
+	}
+	const char* Data()
+	{
+		strOut.resize(nLength + 6);
+		BYTE* pData = (BYTE*)strOut.c_str();
+		*(WORD*)pData = sHead; pData += 2;
+		*(DWORD*)(pData) = nLength; pData += 4;
+		*(WORD*)pData = sCmd; pData += 2;
+		memcpy(pData, strData.c_str(), strData.size()); pData += strData.size();
+		*(WORD*)pData = sSum;
+		return strOut.c_str();
+
+	}
+	
+
 public:
 	WORD sHead;
 	DWORD nLength;
 	WORD sCmd;
 	std::string strData;
 	WORD sSum;
+	std::string strOut;
 private:
 
 };
-
+#pragma pack(pop)
 class CServerSocket
 {
 
@@ -152,10 +185,26 @@ public:
 	}
 
 	bool Send(const char*pData,int nSize) {
-	
+		if (m_client_sock == -1)return false;
 		return send(m_client_sock, pData, nSize, 0)>0;
 	
 	
+	}
+	bool Send(CPacket& pack) {
+		if (m_client_sock == -1)return false;
+		return send(m_client_sock, pack.Data(), pack.Size(), 0) > 0;
+	
+	}
+
+	bool GetFilePath(std::string& strPath) {
+		if ((m_packet.sCmd >= 2)&&((m_packet.sCmd <= 4))) {
+			strPath = m_packet.strData;
+			return true;
+		
+		}
+
+		return false;
+
 	}
 private:
 	SOCKET m_serv_sock;
