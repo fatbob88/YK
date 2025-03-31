@@ -6,6 +6,9 @@
 #include "YK.h"
 #include "ServerSocket.h"
 #include <direct.h>
+#include <atlimage.h>
+
+
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -150,6 +153,207 @@ int DownloadFile() {
 	return 0;
 }
 
+int MouseEven() {
+
+	MOUSEEV mouse;
+	if (CServerSocket::getInstance()->GetMouseEvent(mouse)) {
+		DWORD nFlags = 0;
+		switch (mouse.nButton) {
+		case 0://左键
+			nFlags = 1;
+			break;
+		case 1://右键
+			nFlags = 2;
+			break;
+		case 2://中键
+			nFlags = 4;
+			break;
+		case 4://没有按键
+			nFlags = 8;
+			break;
+		}
+		if (nFlags != 8)SetCursorPos(mouse.ptXY.x, mouse.ptXY.y);
+		switch (mouse.nAction)
+		{
+		case 0://单击
+			nFlags |= 0x10;
+			break;
+		case 1://双击
+			nFlags |= 0x20;
+			break;
+		case 2://按下
+			nFlags |= 0x40;
+			break;
+		case 3://放开
+			nFlags |= 0x80;
+			break;
+		default:
+			break;
+		}
+		TRACE("mouse event : %08X x %d y %d\r\n", nFlags, mouse.ptXY.x, mouse.ptXY.y);
+		switch (nFlags)
+		{
+		case 0x21://左键双击
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x11://左键单击
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x41://左键按下
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x81://左键放开
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x22://右键双击
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x12://右键单击
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x42://右键按下
+			mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x82://右键放开
+			mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x24://中键双击
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+		case 0x14://中键单击
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x44://中键按下
+			mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x84://中键放开
+			mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, GetMessageExtraInfo());
+			break;
+		case 0x08://单纯的鼠标移动
+			mouse_event(MOUSEEVENTF_MOVE, mouse.ptXY.x, mouse.ptXY.y, 0, GetMessageExtraInfo());
+			break;
+		}
+		CPacket pack(4, NULL, 0);
+		CServerSocket::getInstance()->Send(pack);
+	}
+	else {
+		OutputDebugString(_T("获取鼠标操作参数失败！！"));
+		return -1;
+	}
+	return 0;
+}
+
+int SendScreen() 
+{    
+	CImage screen;//GDI
+	HDC hScreen = ::GetDC(NULL);
+	int nBitPerPixel = GetDeviceCaps(hScreen, BITSPIXEL);//24   ARGB8888 32bit RGB888 24bit RGB565  RGB444
+	int nWidth = GetDeviceCaps(hScreen, HORZRES);
+	int nHeight = GetDeviceCaps(hScreen, VERTRES);
+	screen.Create(nWidth, nHeight, nBitPerPixel);
+	BitBlt(screen.GetDC(), 0, 0, nWidth, nHeight, hScreen, 0, 0, SRCCOPY);
+	ReleaseDC(NULL, hScreen);
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, 0);
+	if (hMem == NULL)return -1;
+	IStream* pStream = NULL;
+	HRESULT ret = CreateStreamOnHGlobal(hMem, TRUE, &pStream);
+	if (ret == S_OK) {
+		screen.Save(pStream, Gdiplus::ImageFormatPNG);
+		LARGE_INTEGER bg = { 0 };
+		pStream->Seek(bg, STREAM_SEEK_SET, NULL);
+		PBYTE pData = (PBYTE)GlobalLock(hMem);
+		SIZE_T nSize = GlobalSize(hMem);
+		CPacket pack(6, pData, nSize);
+		CServerSocket::getInstance()->Send(pack);
+		GlobalUnlock(hMem);
+	}
+	//screen.Save(_T("test2020.png"), Gdiplus::ImageFormatPNG);
+	/*
+	TRACE("png %d\r\n", GetTickCount64() - tick);
+	for (int i = 0; i < 10; i++) {
+		DWORD tick = GetTickCount64();
+		screen.Save(_T("test2020.png"), Gdiplus::ImageFormatPNG);
+		TRACE("png %d\r\n", GetTickCount64() - tick);
+		tick = GetTickCount64();
+		screen.Save(_T("test2020.jpg"), Gdiplus::ImageFormatJPEG);
+		TRACE("jpg %d\r\n", GetTickCount64() - tick) ;
+	}*/
+	pStream->Release();
+	GlobalFree(hMem);
+	screen.ReleaseDC();
+	return 0;
+
+
+
+	return 0;
+}
+
+#include "LockDialog.h"
+CLockDialog dlg;
+unsigned threadid=0;
+
+unsigned __stdcall threadLockDlg(void* arg) {
+
+
+	dlg.Create(IDD_DIALOG_INFO, NULL);
+	dlg.ShowWindow(SW_SHOW);
+	CRect rect;
+	rect.top = 0;
+	rect.left = 0;
+	rect.right = GetSystemMetrics(SM_CXFULLSCREEN);
+	rect.bottom = GetSystemMetrics(SM_CYFULLSCREEN);
+	rect.bottom *= 1.04;
+	dlg.MoveWindow(rect);
+	dlg.SetWindowPos(&dlg.wndTopMost, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+	ShowCursor(false);
+	::ShowWindow(::FindWindow(_T("Shell_TryWnd"), NULL), SW_HIDE);//隐藏任务栏
+	//dlg.GetWindowRect(rect);
+	ClipCursor(rect);
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0)) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+		if (msg.message == WM_KEYDOWN) {
+			if (msg.wParam == 0x1B)break;
+		}
+	}
+	
+	ShowCursor(true);
+	::ShowWindow(::FindWindow(_T("Shell_TryWnd"), NULL), SW_SHOW);
+	dlg.DestroyWindow();
+	_endthreadex(0);
+	return 0;
+}
+
+int LockMachine() {
+	if ((dlg.m_hWnd == NULL) || (dlg.m_hWnd == INVALID_HANDLE_VALUE)) {
+		//_beginthread(threadLockDlg, 0, NULL);
+		_beginthreadex(NULL, 0, threadLockDlg, NULL, 0, &threadid);
+		TRACE("threadid=%d\r\n", threadid);
+	}
+	CPacket pack(7, NULL, 0);
+	CServerSocket::getInstance()->Send(pack);
+	return 0;
+
+}
+
+
+
+
+int UnLockMachine() {
+	//dlg.SendMessage(WM_KEYDOWN, 0x41, 0x01E0001);
+	//::SendMessage(dlg.m_hWnd, WM_KEYDOWN, 0x41, 0x01E0001);
+	PostThreadMessage(threadid, WM_KEYDOWN, 0x41, 0);
+	CPacket pack(8, NULL, 0);
+	CServerSocket::getInstance()->Send(pack);
+	return 0;
+
+}
+
+
 int main()
 {
     int nRetCode = 0;
@@ -186,7 +390,8 @@ int main()
    //                 }
    //               int ret = pserver->DealCommand();
    //         }
-            int nCmd = 1;
+		
+            int nCmd =7;
             switch (nCmd) {
             case 1:
                 MakeDriverInfo();
@@ -198,10 +403,21 @@ int main()
             case 4:
                 DownloadFile();
                 break;
-
-
-
+			case 5:
+				MouseEven();
+				break;
+			case 6:
+				SendScreen();
+				break;
+			case 7:
+				LockMachine();
+				break;
+			case 8:
+				UnLockMachine();
+				break;
             }
+			
+
         }
     }
     else
