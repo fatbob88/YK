@@ -24,7 +24,21 @@ public:
 		sHead = pack.sHead;
 		nLength = pack.nLength;
 		sCmd = pack.sCmd;
+		strData = pack.strData;
 		sSum = pack.sSum;
+	}
+
+	CPacket& operator=(const CPacket& pack) {
+		if (this != &pack) {
+			sHead = pack.sHead;
+			nLength = pack.nLength;
+			sCmd = pack.sCmd;
+			strData = pack.strData;
+			sSum = pack.sSum;
+		}
+		return *this;
+	
+	
 	}
 	CPacket(const BYTE* pData, size_t& nSize) {
 	
@@ -40,6 +54,7 @@ public:
 
 		}
 		if (i+8 >=nSize) {//包数据可能不全,包头可能未全部解析到
+
 			nSize = 0;
 			return;
 		}
@@ -57,6 +72,7 @@ public:
 			i += nLength - 4;
 		}
 		sSum = *(WORD*)(pData + i);
+		i += 2;
 		WORD sum = 0;
 		for (size_t j = 0; j < strData.size(); j++) {
 
@@ -66,7 +82,7 @@ public:
 		}
 		if (sum == sSum) {
 		
-			nSize = nLength + 2 + 4;
+			nSize = i;
 			return;
 		}
 		nSize = 0;
@@ -114,19 +130,25 @@ public:
 		if (m_client_sock == -1)return false;
 		return true;
 	}
-
+#define BUFFER_SIZE 4096
 	int DealCommand() {
 		if (m_client_sock == -1)return -1;
-		char *buffer= new char[4096];
-		memset(buffer, 0, 4096);
+		char *buffer= new char[BUFFER_SIZE];
+		memset(buffer, 0, BUFFER_SIZE);
+		size_t index = 0;
 		while (1) {
-			size_t len=recv(m_client_sock, buffer, sizeof(buffer), 0);
+			size_t len=recv(m_client_sock, buffer+index, sizeof(buffer), 0);
 			if (len <= 0)return -1;
-			CPacket packet((BYTE*)buffer, len);
+			index += len;
+			len = index;
+			m_packet=CPacket ((BYTE*)buffer, index);
 			if (len > 0) {
-				return packet.sCmd;
+				memmove(buffer, buffer + len, BUFFER_SIZE - len);
+				index-= len;
+				return m_packet.sCmd;
 			}
 		}
+		return -1;
 	}
 
 	bool Send(const char*pData,int nSize) {
