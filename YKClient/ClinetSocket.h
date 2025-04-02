@@ -1,7 +1,9 @@
 #pragma once
 #include "pch.h"
 #include "framework.h"
-void Dump(BYTE* pData, size_t nSize);
+#include <string>
+#include <vector>
+
 #pragma pack(push)
 #pragma pack(1)
 class CPacket
@@ -41,12 +43,12 @@ public:
 				break;
 			}
 		}
-		if (i + 4 + 2 + 2 > nSize) {//     ݿ  ܲ ȫ     ߰ ͷδ  ȫ     յ 
+		if (i + 4 + 2 + 2 > nSize) {
 			nSize = 0;
 			return;
 		}
 		nLength = *(DWORD*)(pData + i); i += 4;
-		if (nLength + i > nSize) {//  δ  ȫ   յ    ͷ  أ     ʧ  
+		if (nLength + i > nSize) {
 			nSize = 0;
 			return;
 		}
@@ -54,6 +56,7 @@ public:
 		if (nLength > 4) {
 			strData.resize(nLength - 2 - 2);
 			memcpy((void*)strData.c_str(), pData + i, nLength - 4);
+			TRACE("%s\r\n", strData.c_str() + 12);
 			i += nLength - 4;
 		}
 		sSum = *(WORD*)(pData + i); i += 2;
@@ -79,7 +82,7 @@ public:
 		}
 		return *this;
 	}
-	int Size() {//     ݵĴ С
+	int Size() {
 		return nLength + 6;
 	}
 	const char* Data() {
@@ -110,9 +113,9 @@ typedef struct MouseEvent {
 		ptXY.x = 0;
 		ptXY.y = 0;
 	}
-	WORD nAction;//      ƶ   ˫  
-	WORD nButton;//      Ҽ    м 
-	POINT ptXY;//    
+	WORD nAction; 
+	WORD nButton;
+	POINT ptXY;  
 }MOUSEEV, * PMOUSEEV;
 
 typedef struct file_info {
@@ -122,92 +125,81 @@ typedef struct file_info {
 		HasNext = TRUE;
 		memset(szFileName, 0, sizeof(szFileName));
 	}
-	BOOL IsInvalid;// 
-	BOOL IsDirectory;//  
-	BOOL HasNext;//   
-	char szFileName[256];// ļ   
+	BOOL IsInvalid;
+	BOOL IsDirectory;
+	BOOL HasNext;
+	char szFileName[256];
 }FILEINFO, * PFILEINFO;
 
-class CServerSocket
+std::string GetErrInfo(int wsaErrCode);
+void Dump(BYTE* pData, size_t nSize);
+class CClientSocket
 {
 public:
-	static CServerSocket* getInstance() {
-		if (m_instance == NULL) {//  
-			m_instance = new CServerSocket();
+	static CClientSocket* getInstance() {
+		if (m_instance == NULL) {//   
+			m_instance = new CClientSocket();
 		}
 		return m_instance;
 	}
-	bool InitSocket() {
+	bool InitSocket(int nIP, int nPort) {
+		if (m_sock != INVALID_SOCKET)CloseSocket();
+		m_sock = socket(PF_INET, SOCK_STREAM, 0);
 		if (m_sock == -1)return false;
 		sockaddr_in serv_adr;
 		memset(&serv_adr, 0, sizeof(serv_adr));
 		serv_adr.sin_family = AF_INET;
-		serv_adr.sin_addr.s_addr = INADDR_ANY;
-		serv_adr.sin_port = htons(9527);
-		//  
-		if (bind(m_sock, (sockaddr*)&serv_adr, sizeof(serv_adr)) == -1) {
+		TRACE("addr %08X nIP %08X\r\n", inet_addr("127.0.0.1"), nIP);
+		serv_adr.sin_addr.s_addr = htonl(nIP);
+		serv_adr.sin_port = htons(nPort);
+		if (serv_adr.sin_addr.s_addr == INADDR_NONE) {
+			AfxMessageBox(_T("指定的ip地址不存在!"));
 			return false;
 		}
-		if (listen(m_sock, 1) == -1) {
+		int ret = connect(m_sock, (sockaddr*)&serv_adr, sizeof(serv_adr));
+		if (ret == -1) {
+			AfxMessageBox(_T("连接失败"));
+			//TRACE("连接失败：%d %s\r\n", WSAGetLastError(), GetErrInfo(WSAGetLastError()).c_str());
 			return false;
 		}
 		return true;
 	}
 
-	bool AcceptClient() {
-		TRACE("enter AcceptClient\r\n");
-		sockaddr_in client_adr;
-		int cli_sz = sizeof(client_adr);
-		m_client = accept(m_sock, (sockaddr*)&client_adr, &cli_sz);
-		TRACE("m_client = %d\r\n", m_client);
-		if (m_client == -1)return false;
-		return true;
-	}
-#define BUFFER_SIZE 4096
+
+#define BUFFER_SIZE 2048000
 	int DealCommand() {
-		if (m_client == -1)return -1;
-		//char buffer[1024] = "";
-		char* buffer = new char[BUFFER_SIZE];
-		if (buffer == NULL) {
-			TRACE(" 内存不足\r\n");
-			return -2;
-		}
-		memset(buffer, 0, BUFFER_SIZE);
-		size_t index = 0;
+		if (m_sock == -1)return -1;
+		char* buffer = m_buffer.data();
+		static size_t index = 0;
 		while (true) {
-			size_t len = recv(m_client, buffer + index, BUFFER_SIZE - index, 0);
-			if (len <= 0) {
-				delete[]buffer;
+			size_t len = recv(m_sock, buffer + index, BUFFER_SIZE - index, 0);
+			if ((len <= 0) && (index <= 0)) {
 				return -1;
 			}
-			TRACE("recv %d\r\n", len);
+			//Dump((BYTE*)buffer, index);
 			index += len;
 			len = index;
 			m_packet = CPacket((BYTE*)buffer, len);
 			if (len > 0) {
-				memmove(buffer, buffer + len, BUFFER_SIZE - len);
+				memmove(buffer, buffer + len, index - len);
 				index -= len;
-				delete[]buffer;
 				return m_packet.sCmd;
 			}
 		}
-		delete[]buffer;
 		return -1;
 	}
 
 	bool Send(const char* pData, int nSize) {
-		if (m_client == -1)return false;
-		return send(m_client, pData, nSize, 0) > 0;
+		if (m_sock == -1)return false;
+		return send(m_sock, pData, nSize, 0) > 0;
 	}
 	bool Send(CPacket& pack) {
-		if (m_client == -1)return false;
-		//Dump((BYTE*)pack.Data(), pack.Size());
-		return send(m_client, pack.Data(), pack.Size(), 0) > 0;
+		TRACE("m_sock = %d\r\n", m_sock);
+		if (m_sock == -1)return false;
+		return send(m_sock, pack.Data(), pack.Size(), 0) > 0;
 	}
 	bool GetFilePath(std::string& strPath) {
-		if (((m_packet.sCmd >= 2) && (m_packet.sCmd <= 4)) ||
-			(m_packet.sCmd == 9))
-		{
+		if ((m_packet.sCmd >= 2) && (m_packet.sCmd <= 4)) {
 			strPath = m_packet.strData;
 			return true;
 		}
@@ -223,28 +215,27 @@ public:
 	CPacket& GetPacket() {
 		return m_packet;
 	}
-	void CloseClient() {
-		closesocket(m_client);
-		m_client = INVALID_SOCKET;
+	void CloseSocket() {
+		closesocket(m_sock);
+		m_sock = INVALID_SOCKET;
 	}
 private:
-	SOCKET m_client;
+	std::vector<char> m_buffer;
 	SOCKET m_sock;
 	CPacket m_packet;
-	CServerSocket& operator=(const CServerSocket& ss) {}
-	CServerSocket(const CServerSocket& ss) {
+	CClientSocket& operator=(const CClientSocket& ss) {}
+	CClientSocket(const CClientSocket& ss) {
 		m_sock = ss.m_sock;
-		m_client = ss.m_client;
 	}
-	CServerSocket() {
-		m_client = INVALID_SOCKET;
+	CClientSocket() {
 		if (InitSockEnv() == FALSE) {
-			MessageBox(NULL, _T(" ޷   ʼ   ׽  ֻ   ,           ã "), _T("  ʼ      "), MB_OK | MB_ICONERROR);
+			MessageBox(NULL, _T("无法初始化SOCKET环境"), _T("初始化错误"), MB_OK | MB_ICONERROR);
 			exit(0);
 		}
-		m_sock = socket(PF_INET, SOCK_STREAM, 0);
+		m_buffer.resize(BUFFER_SIZE);
+		memset(m_buffer.data(), 0, BUFFER_SIZE);
 	}
-	~CServerSocket() {
+	~CClientSocket() {
 		closesocket(m_sock);
 		WSACleanup();
 	}
@@ -257,21 +248,20 @@ private:
 	}
 	static void releaseInstance() {
 		if (m_instance != NULL) {
-			CServerSocket* tmp = m_instance;
+			CClientSocket* tmp = m_instance;
 			m_instance = NULL;
 			delete tmp;
 		}
 	}
-	static CServerSocket* m_instance;
+	static CClientSocket* m_instance;
 	class CHelper {
 	public:
 		CHelper() {
-			CServerSocket::getInstance();
+			CClientSocket::getInstance();
 		}
 		~CHelper() {
-			CServerSocket::releaseInstance();
+			CClientSocket::releaseInstance();
 		}
 	};
 	static CHelper m_helper;
 };
-
